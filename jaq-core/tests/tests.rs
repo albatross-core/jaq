@@ -68,6 +68,14 @@ yields!(div_str_empty, r#""" / """#, json!([]));
 yields!(div_str_empty_str, r#""" / "ab""#, json!([]));
 yields!(div_str_empty_sep, r#""aöß" / """#, ["a", "ö", "ß"]);
 
+// Check whether `isize::MIN % -1` yields 0, instead of a panic.
+// The integers come from the input, because jaq-json 1.x
+// turns number literals into floats when calculating with them.
+#[test]
+fn rem_isize_min() {
+    give(json!([isize::MIN, -1]), ".[0] % .[1]", json!(0));
+}
+
 #[test]
 fn logic() {
     let tf = json!([true, false]);
