@@ -2,6 +2,8 @@
 //!
 //! Rust's sort may panic if `Ord` is not a total order,
 //! so every comparison that sorting uses must be transitive.
+//! The edge cases assume a 64-bit `isize`.
+#![cfg(target_pointer_width = "64")]
 
 pub mod common;
 
@@ -93,57 +95,201 @@ fn int_float_cmp_exact() {
     give(json!(1), "[. > nan, nan < .]", json!([true, true]));
 }
 
-/// Numbers at the edges of exact `f64` and `isize`, in all representations.
+fn num(n: &str) -> Val {
+    Val::Num(Rc::new(n.to_string()))
+}
+
+/// Numbers at the edges of exact `f64`, `isize` and `i128`, in all representations,
+/// as ascending classes of equal values.
+///
+/// A `Num` is the integer it writes if that fits into `i128`, else its nearest float.
+/// A `Num` that does not parse is `null`.
+fn number_classes() -> Vec<Vec<Val>> {
+    use Val::{Float, Int};
+    let big = |sign: &str| format!("{sign}1{}", "0".repeat(400));
+    vec![
+        vec![
+            Val::Null,
+            num(""),
+            num("abc"),
+            num("1e"),
+            num("+-9223372036854775809"),
+            num("92233720368547758O9"),
+        ],
+        vec![Val::Bool(false)],
+        vec![Val::Bool(true)],
+        vec![
+            Float(f64::NEG_INFINITY),
+            num("-inf"),
+            num("-1e400"),
+            num(&big("-")),
+        ],
+        vec![Float(-f64::MAX), num("-1.7976931348623157e308")],
+        // float below -2^127
+        vec![
+            Float(-170141183460469269510619166673045815296.0),
+            num("-170141183460469269510619166673045815296"),
+        ],
+        // `i128::MIN`, and the integer below it, which is beyond `i128`
+        vec![
+            Float(-170141183460469231731687303715884105728.0),
+            num("-170141183460469231731687303715884105728"),
+            num("-170141183460469231731687303715884105729"),
+        ],
+        vec![num("-170141183460469231731687303715884105727")],
+        vec![num("-18446744073709551617")],
+        vec![Float(-18446744073709551616.0), num("-18446744073709551616")],
+        // float below -2^63
+        vec![Float(-9223372036854777856.0), num("-9223372036854777856")],
+        vec![num("-9223372036854775809")],
+        vec![
+            Int(isize::MIN),
+            Float(-9223372036854775808.0),
+            num("-9223372036854775808"),
+        ],
+        vec![Int(isize::MIN + 1)],
+        vec![Int(-P53 - 1)],
+        vec![Int(-P53), Float(-(P53 as f64))],
+        vec![Int(-1), Float(-1.0), num("-1e0")],
+        vec![Float(-0.5), num("-0.5")],
+        vec![
+            Int(0),
+            Float(0.0),
+            Float(-0.0),
+            num("-0"),
+            num("0.0"),
+            num("-0e5"),
+            num("1e-99999999999999999999"),
+            num("0000000000000000"),
+            num("-0000000000000000"),
+        ],
+        vec![Float(5e-324), num("5e-324")],
+        vec![Float(f64::MIN_POSITIVE)],
+        vec![Float(0.1), num("0.1"), num("0.10000000000000001")],
+        vec![Float(0.5), num("0.5")],
+        vec![
+            Int(1),
+            Float(1.0),
+            num("1.0"),
+            num("1e0"),
+            num("+0000000000000001"),
+        ],
+        vec![
+            Int(P53 - 1),
+            Float((P53 - 1) as f64),
+            num("9007199254740991"),
+        ],
+        // a fraction is its nearest float
+        vec![
+            Int(P53),
+            Float(P53 as f64),
+            num("9007199254740992"),
+            num("9007199254740993.0"),
+        ],
+        // an integer written with 16 bytes is beyond exact floats
+        vec![Int(P53 + 1), num("9007199254740993")],
+        vec![Int(P53 + 2), Float((P53 + 2) as f64)],
+        // float below 2^63
+        vec![
+            Int(9223372036854774784),
+            Float(9223372036854774784.0),
+            num("9223372036854774784"),
+        ],
+        vec![Int(isize::MAX - 1)],
+        vec![Int(isize::MAX), num("9223372036854775807")],
+        vec![
+            Float(9223372036854775808.0),
+            num("9223372036854775808"),
+            num("9223372036854775808.0"),
+            num("9223372036854775808.5"),
+            // beyond the next integer, which compares exactly
+            num("9223372036854775809.5"),
+            num("9.223372036854775809e18"),
+        ],
+        vec![
+            num("9223372036854775809"),
+            num("+9223372036854775809"),
+            num("09223372036854775809"),
+        ],
+        vec![num("9223372036854775810")],
+        // float above 2^63
+        vec![Float(9223372036854777856.0), num("9223372036854777856")],
+        // float below 2^64
+        vec![Float(18446744073709549568.0), num("18446744073709549568")],
+        vec![num("18446744073709551615")],
+        vec![Float(18446744073709551616.0), num("18446744073709551616")],
+        vec![num("18446744073709551617")],
+        // float below 2^127
+        vec![
+            Float(170141183460469212842221372237303250944.0),
+            num("170141183460469212842221372237303250944"),
+        ],
+        vec![num("170141183460469231731687303715884105726")],
+        // `i128::MAX` rounds up to the float 2^127
+        vec![num("170141183460469231731687303715884105727")],
+        // integers beyond `i128` are their nearest float
+        vec![
+            Float(170141183460469231731687303715884105728.0),
+            num("170141183460469231731687303715884105728"),
+            num("170141183460469231731687303715884105729"),
+        ],
+        vec![Float(f64::MAX), num("1.7976931348623157e308")],
+        vec![
+            Float(f64::INFINITY),
+            num("inf"),
+            num("1e400"),
+            num(&big("")),
+        ],
+        vec![Val::from(String::new())],
+    ]
+}
+
 fn edge_numbers() -> Vec<Val> {
-    let ints = [
-        0,
-        1,
-        -1,
-        P53 - 1,
-        P53,
-        P53 + 1,
-        P53 + 2,
-        -P53 - 1,
-        -P53,
-        isize::MAX - 1,
-        isize::MAX,
-        isize::MIN + 1,
-        isize::MIN,
-    ];
-    let floats = [
-        0.0,
-        -0.0,
-        0.5,
-        -0.5,
-        1.0,
-        P53 as f64,
-        (P53 + 2) as f64,
-        -(P53 as f64),
-        // largest float below 2^63
-        9223372036854774784.0,
-        9223372036854775808.0,
-        -9223372036854775808.0,
-        -9223372036854777856.0,
-        f64::MIN_POSITIVE,
-        5e-324,
-        f64::MAX,
-        f64::INFINITY,
-        f64::NEG_INFINITY,
-    ];
-    let nums = [
-        "9223372036854775808",
-        "9223372036854775809",
-        "18446744073709551615",
-        "-9223372036854775809",
-        "9007199254740993.0",
-        "0.1",
-        "1e400",
-        "-1e400",
-    ];
-    let ints = ints.into_iter().map(Val::Int);
-    let floats = floats.into_iter().map(Val::Float);
-    let nums = nums.into_iter().map(|n| Val::Num(Rc::new(n.to_string())));
-    ints.chain(floats).chain(nums).collect()
+    number_classes().into_iter().flatten().collect()
+}
+
+#[test]
+fn numbers_compare_by_exact_value() {
+    let classes = number_classes();
+    let vals = classes.iter().enumerate();
+    let vals: Vec<_> = vals
+        .flat_map(|(i, c)| c.iter().map(move |v| (i, v)))
+        .collect();
+    for (i, a) in &vals {
+        for (j, b) in &vals {
+            assert_eq!(a.cmp(b), i.cmp(j), "{a:?} vs. {b:?}");
+            assert_eq!(a == b, i == j, "{a:?} vs. {b:?}");
+        }
+    }
+}
+
+#[test]
+fn ids_above_2_pow_63_stay_distinct() {
+    // 2^63 and above do not fit into `isize`, so they are `Num`s
+    let ids = || {
+        let id = |d| json!((1_u64 << 63) + d);
+        json!([id(1), id(0), id(1), id(0), u64::MAX, id(2048)])
+    };
+    let unique =
+        "[9223372036854775808,9223372036854775809,9223372036854777856,18446744073709551615]";
+    give(ids(), "unique | tojson", json!(unique));
+    give(ids(), "group_by(.) | map(length)", json!([2, 2, 1, 1]));
+    give(ids(), "[.[0] == .[1], .[0] > .[1]]", json!([false, true]));
+    give(ids(), "index(9223372036854775808)", json!(1));
+    give(
+        ids(),
+        "[.[0]] | contains([9223372036854775808])",
+        json!(false),
+    );
+    give(
+        ids(),
+        ". - [9223372036854775808] | unique | length",
+        json!(3),
+    );
+    let float = "[.[1] == 9223372036854775808.0, .[0] > 9223372036854775808.0]";
+    give(ids(), float, json!([true, true]));
+    // NaN stays smaller than any number
+    give(ids(), "[.[0] > nan, nan < .[0]]", json!([true, true]));
 }
 
 #[test]

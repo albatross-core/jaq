@@ -26,6 +26,9 @@ use hifijson::{LexAlloc, Token};
 /// Operations on numbers follow a few principles:
 /// * The sum, difference, product, and remainder of two integers is integer.
 /// * Any other operation between two numbers yields a float.
+/// * Comparison is by exact value.
+///   A [`Val::Num`] counts as the integer it writes if that fits into `i128`,
+///   else (for example a fraction) as its nearest float.
 #[derive(Clone, Debug, Default)]
 pub enum Val {
     #[default]
@@ -527,6 +530,37 @@ impl Val {
         n.parse().map_or(Self::Null, Self::Float)
     }
 
+    /// Parse the text of a [`Self::Num`] as integer that fits into `i128`.
+    ///
+    /// This skips integers written with fewer than 16 bytes,
+    /// because they are below 2^53, where [`Self::from_dec_str`] is exact.
+    fn num_int(n: &str) -> Option<i128> {
+        if n.len() >= 16 {
+            parse_int(n)
+        } else {
+            None
+        }
+    }
+
+    /// Return the number to compare, or `None` if this is no number.
+    ///
+    /// A [`Self::Num`] is the integer it writes if that fits into `i128`,
+    /// else its nearest float like [`Self::from_dec_str`],
+    /// or `None` where that yields null.
+    /// Inlining it lets [`num_cmp`] keep the result in registers.
+    #[inline(always)]
+    fn number(&self) -> Option<Number> {
+        match self {
+            Self::Int(i) => Some(Number::Int(*i)),
+            Self::Float(f) => Some(Number::Float(*f)),
+            Self::Num(n) => match Self::num_int(n) {
+                Some(i) => Some(isize::try_from(i).map_or(Number::Big(i), Number::Int)),
+                None => n.parse().ok().map(Number::Float),
+            },
+            _ => None,
+        }
+    }
+
     /// Return true if `value | .[key]` is defined.
     ///
     /// Fail on values that are neither arrays nor objects.
@@ -873,7 +907,11 @@ impl core::ops::Neg for Val {
         match self {
             Int(x) => Ok(Int(-x)),
             Float(x) => Ok(Float(-x)),
-            Num(n) => -Self::from_dec_str(&n),
+            // negating an integer is exact, like in jq
+            Num(n) => match Self::num_int(&n).and_then(i128::checked_neg) {
+                Some(i) => Ok(isize::try_from(i).map_or_else(|_| Num(Rc::new(i.to_string())), Int)),
+                None => -Self::from_dec_str(&n),
+            },
             x => Err(Error::typ(x, Type::Num.as_str())),
         }
     }
@@ -890,6 +928,10 @@ impl PartialEq for Val {
             }
             (Self::Float(x), Self::Float(y)) => float_eq(*x, *y),
             (Self::Num(x), Self::Num(y)) if Rc::ptr_eq(x, y) => true,
+            (Self::Num(_), Self::Int(_) | Self::Float(_) | Self::Num(_))
+            | (Self::Int(_) | Self::Float(_), Self::Num(_)) => {
+                num_cmp(self, other) == Ordering::Equal
+            }
             (Self::Num(n), y) => &Self::from_dec_str(n) == y,
             (x, Self::Num(n)) => x == &Self::from_dec_str(n),
             (Self::Str(x), Self::Str(y)) => x == y,
@@ -919,6 +961,8 @@ impl Ord for Val {
             (Self::Float(f), Self::Int(i)) => int_float_cmp(*i, *f).reverse(),
             (Self::Float(x), Self::Float(y)) => float_cmp(*x, *y),
             (Self::Num(x), Self::Num(y)) if Rc::ptr_eq(x, y) => Equal,
+            (Self::Num(_), Self::Int(_) | Self::Float(_) | Self::Num(_))
+            | (Self::Int(_) | Self::Float(_), Self::Num(_)) => num_cmp(self, other),
             (Self::Num(n), y) => Self::from_dec_str(n).cmp(y),
             (x, Self::Num(n)) => x.cmp(&Self::from_dec_str(n)),
             (Self::Str(x), Self::Str(y)) => x.cmp(y),
@@ -982,6 +1026,87 @@ fn int_float_cmp(i: isize, f: f64) -> Ordering {
         Some(Ordering::Equal) => i.cmp(&(f as isize)),
         Some(ord) => ord,
     }
+}
+
+/// Number as compared by [`num_cmp`], see [`Val::number`].
+enum Number {
+    Int(isize),
+    /// Integer beyond `isize`
+    Big(i128),
+    Float(f64),
+}
+
+/// Compare two numbers by their exact values, at least one of them a [`Val::Num`].
+///
+/// Comparing a `Num` via its nearest float made integers beyond 2^63
+/// less than 2^11 apart equal, such as two `u64` ids.
+/// It stays out of line, so that `Val::cmp` stays small for other numbers.
+#[inline(never)]
+fn num_cmp(x: &Val, y: &Val) -> Ordering {
+    use Number::{Big, Float, Int};
+    match (x.number(), y.number()) {
+        (Some(Int(x)), Some(Int(y))) => x.cmp(&y),
+        (Some(Int(i)), Some(Float(f))) => int_float_cmp(i, f),
+        (Some(Float(f)), Some(Int(i))) => int_float_cmp(i, f).reverse(),
+        (Some(Float(x)), Some(Float(y))) => float_cmp(x, y),
+        (Some(Big(x)), Some(Big(y))) => x.cmp(&y),
+        // integers beyond `isize` are beyond any `isize`
+        (Some(Big(b)), Some(Int(_))) => b.cmp(&0),
+        (Some(Int(_)), Some(Big(b))) => 0.cmp(&b),
+        (Some(Big(b)), Some(Float(f))) => big_float_cmp(b, f),
+        (Some(Float(f)), Some(Big(b))) => big_float_cmp(b, f).reverse(),
+        // a `Num` that does not parse is null, which is smaller than any number
+        (x, y) => x.is_some().cmp(&y.is_some()),
+    }
+}
+
+/// Compare an integer beyond `isize` with a float by their exact values.
+fn big_float_cmp(i: i128, f: f64) -> Ordering {
+    let p63 = -(isize::MIN as f64);
+    let p127 = -(i128::MIN as f64);
+    if f.is_nan() {
+        // NaN is smaller than any number, like in `float_cmp`
+        Ordering::Greater
+    } else if -p63 <= f && f < p63 {
+        // such floats lie between the integers beyond `isize`
+        i.cmp(&0)
+    } else if f >= p127 {
+        Ordering::Less
+    } else if f < -p127 {
+        Ordering::Greater
+    } else {
+        // the cast rounds toward zero, so on a tie, the fraction of `f` decides
+        let t = f as i128;
+        let frac = || (t as f64).partial_cmp(&f).unwrap_or(Ordering::Equal);
+        i.cmp(&t).then_with(frac)
+    }
+}
+
+/// Parse integer text with an optional sign, if it fits into `i128`.
+///
+/// The first 19 digits fit into `u64`,
+/// where multiplying by 10 is cheaper than in `i128` as `str::parse` does.
+/// `i128::MIN` does not fit here, but floats hold it exactly.
+fn parse_int(n: &str) -> Option<i128> {
+    let (neg, digits) = match n.as_bytes() {
+        [b'-', digits @ ..] => (true, digits),
+        [b'+', digits @ ..] => (false, digits),
+        digits => (false, digits),
+    };
+    if digits.is_empty() {
+        return None;
+    }
+    let (head, tail) = digits.split_at(digits.len().min(19));
+    let digit = |d: &u8| d.checked_sub(b'0').filter(|d| *d < 10);
+    // 19 digits are below 10^19 < 2^64
+    let head = head
+        .iter()
+        .try_fold(0u64, |x, d| Some(x * 10 + u64::from(digit(d)?)));
+    let mag = tail.iter().try_fold(u128::from(head?), |x, d| {
+        x.checked_mul(10)?.checked_add(u128::from(digit(d)?))
+    })?;
+    let i = i128::try_from(mag).ok()?;
+    Some(if neg { -i } else { i })
 }
 
 fn float_cmp(left: f64, right: f64) -> Ordering {
