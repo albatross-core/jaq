@@ -847,7 +847,7 @@ impl PartialEq for Val {
             (Self::Bool(x), Self::Bool(y)) => x == y,
             (Self::Int(x), Self::Int(y)) => x == y,
             (Self::Int(i), Self::Float(f)) | (Self::Float(f), Self::Int(i)) => {
-                float_eq(*i as f64, *f)
+                int_float_cmp(*i, *f) == Ordering::Equal
             }
             (Self::Float(x), Self::Float(y)) => float_eq(*x, *y),
             (Self::Num(x), Self::Num(y)) if Rc::ptr_eq(x, y) => true,
@@ -876,8 +876,8 @@ impl Ord for Val {
             (Self::Null, Self::Null) => Equal,
             (Self::Bool(x), Self::Bool(y)) => x.cmp(y),
             (Self::Int(x), Self::Int(y)) => x.cmp(y),
-            (Self::Int(i), Self::Float(f)) => float_cmp(*i as f64, *f),
-            (Self::Float(f), Self::Int(i)) => float_cmp(*f, *i as f64),
+            (Self::Int(i), Self::Float(f)) => int_float_cmp(*i, *f),
+            (Self::Float(f), Self::Int(i)) => int_float_cmp(*i, *f).reverse(),
             (Self::Float(x), Self::Float(y)) => float_cmp(*x, *y),
             (Self::Num(x), Self::Num(y)) if Rc::ptr_eq(x, y) => Equal,
             (Self::Num(n), y) => Self::from_dec_str(n).cmp(y),
@@ -922,6 +922,27 @@ impl Ord for Val {
 
 fn float_eq(left: f64, right: f64) -> bool {
     float_cmp(left, right) == Ordering::Equal
+}
+
+/// Compare an integer with a float by their exact values.
+///
+/// Comparing `i as f64` alone is lossy beyond 2^53 and made the order intransitive
+/// (2^53 + 1 > 2^53, yet both equal 2^53 as float), so sorting panicked.
+///
+/// This is not inlined, because inlining it into `cmp` cost
+/// an extra instruction on every comparison of two integers.
+#[inline(never)]
+fn int_float_cmp(i: isize, f: f64) -> Ordering {
+    // rounding to nearest is monotonic, so a strict float order is exact.
+    // a tie makes `f` an integer in [isize::MIN, 2^63]
+    match (i as f64).partial_cmp(&f) {
+        // NaN is smaller than any number, like in `float_cmp`
+        None => Ordering::Greater,
+        // 2^63 is `isize::MAX` rounded up, beyond `isize`
+        Some(Ordering::Equal) if f >= -(isize::MIN as f64) => Ordering::Less,
+        Some(Ordering::Equal) => i.cmp(&(f as isize)),
+        Some(ord) => ord,
+    }
 }
 
 fn float_cmp(left: f64, right: f64) -> Ordering {
