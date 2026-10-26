@@ -3,7 +3,7 @@
 pub mod common;
 
 use common::{fail, give};
-use jaq_json::Error;
+use jaq_json::{Error, Val};
 use serde_json::json;
 
 yields!(bsearch_absent1, "[1, 3] | bsearch(0)", -1);
@@ -29,16 +29,14 @@ fn fromjson_depth() {
 
 #[test]
 fn has() {
-    /* TODO: reenable these tests
-    let err = Error::Index(Val::Null, Val::Int(0));
-    fail(json!(null), "has(0)", err);
-    let err = Error::Index(Val::Int(0), Val::Null);
-    fail(json!(0), "has([][0])", err);
-    let err = Error::Index(Val::Int(0), Val::Int(1));
-    fail(json!(0), "has(1)", err);
-    let err = Error::Index(Val::Str("a".to_string().into()), Val::Int(0));
-    fail(json!("a"), "has(0)", err);
-    */
+    // like jq, null has no keys
+    give(json!(null), "has(0)", json!(false));
+    give(json!(null), r#"has("a")"#, json!(false));
+
+    fail(json!(0), "has([][0])", Error::index(Val::Int(0), Val::Null));
+    fail(json!(0), "has(1)", Error::index(Val::Int(0), Val::Int(1)));
+    let s = Val::from("a".to_string());
+    fail(json!("a"), "has(0)", Error::index(s, Val::Int(0)));
 
     give(json!([0, null]), "has(0)", json!(true));
     give(json!([0, null]), "has(1)", json!(true));

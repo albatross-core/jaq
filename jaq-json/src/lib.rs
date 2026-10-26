@@ -125,7 +125,7 @@ impl jaq_core::ValT for Val {
             }
             (Val::Obj(o), Val::Str(s)) => Ok(o.get(s).cloned().unwrap_or(Val::Null)),
             (s @ (Val::Arr(_) | Val::Obj(_)), _) => Err(Error::index(s, index.clone())),
-            (s, _) => Err(Error::typ(s, Type::Iter.as_str())),
+            (s, _) => index_other(s),
         }
     }
 
@@ -154,6 +154,8 @@ impl jaq_core::ValT for Val {
                     Val::from(s.chars().skip(skip).take(take).collect::<String>())
                 })
             }
+            // like jq: slicing null yields null
+            Val::Null => Ok(Val::Null),
             _ => Err(Error::typ(self, Type::Range.as_str())),
         }
     }
@@ -441,6 +443,20 @@ fn abs_bound(i: Option<isize>, len: usize, default: usize) -> usize {
     i.map_or(default, |i| core::cmp::min(wrap(i, len).unwrap_or(0), len))
 }
 
+/// Index a value that is neither array nor object:
+/// like jq, null yields null, any other value fails.
+///
+/// Out of line and cold: a null arm inside `index` made LLVM test null first
+/// and spill the receiver to the stack on every index, about 5 instructions.
+#[cold]
+#[inline(never)]
+fn index_other(v: Val) -> ValR {
+    match v {
+        Val::Null => Ok(Val::Null),
+        v => Err(Error::typ(v, Type::Iter.as_str())),
+    }
+}
+
 /// Absolutise an index and return result if it is inside [0, len).
 fn abs_index(i: isize, len: usize) -> Option<usize> {
     wrap(i, len).filter(|i| *i < len)
@@ -563,11 +579,13 @@ impl Val {
 
     /// Return true if `value | .[key]` is defined.
     ///
-    /// Fail on values that are neither arrays nor objects.
+    /// Return false on null, like jq.
+    /// Fail on other values that are neither arrays nor objects.
     fn has(&self, key: &Self) -> Result<bool, Error> {
         match (self, key) {
             (Self::Arr(a), Self::Int(i)) if *i >= 0 => Ok((*i as usize) < a.len()),
             (Self::Obj(o), Self::Str(s)) => Ok(o.contains_key(&**s)),
+            (Self::Null, _) => Ok(false),
             _ => Err(Error::index(self.clone(), key.clone())),
         }
     }
