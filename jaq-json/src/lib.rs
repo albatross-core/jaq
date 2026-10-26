@@ -404,13 +404,20 @@ fn base() -> Box<[Filter<RunPtr<Val>>]> {
     ])
 }
 
+/// Deepest nesting of arrays and objects that `fromjson` accepts.
+#[cfg(feature = "parse")]
+const FROMJSON_DEPTH: usize = 128;
+
 #[cfg(feature = "parse")]
 /// Convert string to a single JSON value.
+///
+/// Fail on arrays and objects nested deeper than [`FROMJSON_DEPTH`],
+/// which could overflow the stack of the recursive parser.
 fn from_json(s: &str) -> ValR {
     use hifijson::token::Lex;
     let mut lexer = hifijson::SliceLexer::new(s.as_bytes());
     lexer
-        .exactly_one(Val::parse)
+        .exactly_one(|token, lexer| Val::parse_bounded(FROMJSON_DEPTH, token, lexer))
         .map_err(|e| Error::str(format_args!("cannot parse {s} as JSON: {e}")))
 }
 
@@ -575,8 +582,24 @@ impl Val {
     /// If the underlying lexer reads input fallibly (for example `IterLexer`),
     /// the error returned by this function might be misleading.
     /// In that case, always check whether the lexer contains an error.
+    ///
+    /// This does not limit how deeply arrays and objects nest.
+    /// To prevent stack overflows, consider using [`Self::parse_bounded`].
     #[cfg(feature = "hifijson")]
     pub fn parse(token: Token, lexer: &mut impl LexAlloc) -> Result<Self, hifijson::Error> {
+        Self::parse_bounded(usize::MAX, token, lexer)
+    }
+
+    /// Parse at least one JSON value like [`Self::parse`], but fail with
+    /// [`hifijson::Error::Depth`] if arrays and objects nest deeper than `depth`.
+    ///
+    /// This serves to prevent stack overflows.
+    #[cfg(feature = "hifijson")]
+    pub fn parse_bounded(
+        depth: usize,
+        token: Token,
+        lexer: &mut impl LexAlloc,
+    ) -> Result<Self, hifijson::Error> {
         use hifijson::{token, Error};
         match token {
             Token::Null => Ok(Self::Null),
@@ -595,21 +618,23 @@ impl Val {
             }
             Token::Quote => Ok(Self::from(lexer.str_string()?.to_string())),
             Token::LSquare => Ok(Self::Arr({
+                let depth = depth.checked_sub(1).ok_or(Error::Depth)?;
                 let mut arr = Vec::new();
                 lexer.seq(Token::RSquare, |token, lexer| {
-                    arr.push(Self::parse(token, lexer)?);
+                    arr.push(Self::parse_bounded(depth, token, lexer)?);
                     Ok::<_, hifijson::Error>(())
                 })?;
                 arr.into()
             })),
             Token::LCurly => Ok(Self::obj({
+                let depth = depth.checked_sub(1).ok_or(Error::Depth)?;
                 let mut obj = Map::default();
                 lexer.seq(Token::RCurly, |token, lexer| {
                     let key =
                         lexer.str_colon(token, |lexer| lexer.str_string().map_err(Error::Str))?;
 
                     let token = lexer.ws_token().ok_or(token::Expect::Value)?;
-                    let value = Self::parse(token, lexer)?;
+                    let value = Self::parse_bounded(depth, token, lexer)?;
                     obj.insert(Rc::new(key.to_string()), value);
                     Ok::<_, Error>(())
                 })?;

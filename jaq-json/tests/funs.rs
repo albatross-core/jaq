@@ -2,13 +2,30 @@
 
 pub mod common;
 
-use common::give;
+use common::{fail, give};
+use jaq_json::Error;
 use serde_json::json;
 
 yields!(bsearch_absent1, "[1, 3] | bsearch(0)", -1);
 yields!(bsearch_absent2, "[1, 3] | bsearch(2)", -2);
 yields!(bsearch_absent3, "[1, 3] | bsearch(4)", -3);
 yields!(bsearch_present, "[1, 3] | [bsearch(1, 3)]", [0, 1]);
+
+#[test]
+fn fromjson_depth() {
+    let nested = |n| format!("{}{}", "[".repeat(n), "]".repeat(n));
+    give(json!(nested(128)), "fromjson | tojson", json!(nested(128)));
+    let too_deep = |s: String| {
+        let err = Error::str(format_args!(
+            "cannot parse {s} as JSON: maximal depth exceeded"
+        ));
+        fail(json!(s), "fromjson", err)
+    };
+    too_deep(nested(129));
+    // unterminated input, deep enough to overflow the stack without a bound
+    too_deep("[".repeat(100_000));
+    too_deep(r#"{"a":"#.repeat(100_000));
+}
 
 #[test]
 fn has() {
