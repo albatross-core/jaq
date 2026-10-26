@@ -2,6 +2,7 @@ pub mod common;
 
 use common::{fail, give, gives};
 use jaq_core::Error;
+use jaq_json::Val;
 use serde_json::json;
 
 #[test]
@@ -78,6 +79,31 @@ yields!(obj_keyword, "{if: 0} | .if", 0);
 
 yields!(key_update1, "{} | .a  |= .+1", json!({"a": 1}));
 yields!(key_update2, "{} | .a? |= .+1", json!({"a": 1}));
+
+// like jq, indexing or slicing null yields null
+yields!(null_index1, ".a", json!(null));
+yields!(null_index2, ".[0]", json!(null));
+yields!(null_index_deep, r#"{} | .a.b[0]."c""#, json!(null));
+yields!(null_index_alt, "{} | .a.b // 1", 1);
+yields!(
+    null_index_pattern,
+    "{} | . as {a: {b: $x}, c: [$y]} | [$x, $y]",
+    json!([null, null])
+);
+yields!(null_slice, ".[1:2]", json!(null));
+
+#[test]
+fn null_index_errors() {
+    // like jq, iterating null fails
+    let iter = |v| Error::typ(v, "iterable (array or object)");
+    fail(json!(null), ".[]", iter(Val::Null));
+    // indexing a number or string still fails
+    fail(json!(0), ".a", iter(Val::Int(0)));
+    fail(json!("a"), ".[0]", iter(Val::from("a".to_string())));
+    // unlike jq, updating through null fails
+    fail(json!(null), ".a |= 1", iter(Val::Null));
+    fail(json!({}), ".a.b = 1", iter(Val::Null));
+}
 
 // `.[f]?` is *not* the same as `(.[f])?`
 // (we're writing `0[]` to simulate `error` here)

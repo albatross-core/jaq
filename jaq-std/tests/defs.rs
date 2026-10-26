@@ -90,6 +90,16 @@ yields!(map, "[1, 2] | map(.+1)", [2, 3]);
 yields!(last_empty, "[last({}[])]", json!([]));
 yields!(last_some, "last(1, 2, 3)", 3);
 
+// like jq, these index null and yield null
+yields!(first_null, "null | first", json!(null));
+yields!(last_null, "null | last", json!(null));
+yields!(nth_null, "null | nth(1)", json!(null));
+yields!(
+    getpath_null,
+    r#"null | getpath(["a", 0, "b"])"#,
+    json!(null)
+);
+
 yields!(logb_inf, "infinite | logb | . == infinite", true);
 yields!(logb_nan, "nan | logb | isnan", true);
 yields!(logb_neg_inf, "-infinite | logb | . == infinite", true);

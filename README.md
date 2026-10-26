@@ -555,10 +555,12 @@ The interpretation of `reduce`/`foreach` in jaq has the following advantages ove
   `[{a: (1,2), b: (3,4)} | .a * .b]` yields `[3, 4, 6, 8]`.
   jaq yields `[3, 4, 6, 8]` in both cases.
 * Indexing `null`:
-  In jq, when given `null` input, `.["a"]` and `.[0]` yield `null`, but `.[]` yields an error.
-  jaq yields an error in all cases to prevent accidental indexing of `null` values.
-  To obtain the same behaviour in jq and jaq, you can use
-  `.["a"]? // null` or `.[0]? // null` instead.
+  As in jq, when given `null` input, `.["a"]`, `.[0]` and `.[1:2]` yield `null`,
+  `has($k)` yields `false`, and `.[]` yields an error.
+  Upstream jaq 2.x yields an error in all these cases;
+  this fork backports the `null` indexing of jaq 3.0 and also slices `null`.
+  Unlike jq, updating through `null` fails:
+  `null | .a = 1` yields an error, whereas jq yields `{"a": 1}`.
 * List updating:
   In jq, `[0, 1] | .[3] = 3` yields `[0, 1, null, 3]`; that is,
   jq fills up the list with `null`s if we update beyond its size.
