@@ -812,7 +812,11 @@ impl core::ops::Rem for Val {
     fn rem(self, rhs: Self) -> Self::Output {
         use Val::{Float, Int, Num};
         match (self, rhs) {
-            (Int(x), Int(y)) if y != 0 => Ok(Int(x % y)),
+            // `x.checked_rem(y)` is `None` only for:
+            //
+            // - `isize::MIN % -1`: The remainder is always 0.
+            // - `x % 0`: This is guarded by `y != 0`.
+            (Int(x), Int(y)) if y != 0 => Ok(Int(x.checked_rem(y).unwrap_or(0))),
             (Float(f), Int(i)) => Ok(Float(f % i as f64)),
             (Int(i), Float(f)) => Ok(Float(i as f64 % f)),
             (Float(x), Float(y)) => Ok(Float(x % y)),
