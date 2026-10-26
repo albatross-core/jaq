@@ -786,7 +786,7 @@ impl core::ops::Mul for Val {
             (Int(x), Int(y)) => Ok(Int(x * y)),
             (Float(f), Int(i)) | (Int(i), Float(f)) => Ok(Float(f * i as f64)),
             (Float(x), Float(y)) => Ok(Float(x * y)),
-            (Str(s), Int(i)) | (Int(i), Str(s)) if i > 0 => Ok(Self::from(s.repeat(i as usize))),
+            (Str(s), Int(i)) | (Int(i), Str(s)) if i > 0 => repeat(&s, i as usize),
             // string multiplication with negatives or 0 results in null
             // <https://jqlang.github.io/jq/manual/#Builtinoperatorsandfunctions>
             (Str(_), Int(_)) | (Int(_), Str(_)) => Ok(Null),
@@ -798,6 +798,20 @@ impl core::ops::Mul for Val {
             }
             (l, r) => Err(Error::math(l, ops::Math::Mul, r)),
         }
+    }
+}
+
+/// Longest string in bytes that repeating a string with `*` may yield.
+const MAX_REPEAT_BYTES: usize = 1 << 24;
+
+/// Repeat a string `n` times.
+///
+/// Fail if the result exceeds [`MAX_REPEAT_BYTES`],
+/// instead of overflowing its capacity or exhausting memory.
+fn repeat(s: &str, n: usize) -> ValR {
+    match s.len().checked_mul(n) {
+        Some(len) if len <= MAX_REPEAT_BYTES => Ok(Val::from(s.repeat(n))),
+        _ => Err(Error::str("Repeat string result too long")),
     }
 }
 

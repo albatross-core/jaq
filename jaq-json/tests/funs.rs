@@ -101,6 +101,22 @@ fn tojson() {
 }
 
 #[test]
+fn math_mul_str() {
+    give(json!(["ab", 3]), ".[0] * .[1]", json!("ababab"));
+    give(json!(["", isize::MAX]), ".[0] * .[1]", json!(""));
+    // results of up to 16 MiB
+    let len = 1 << 24;
+    give(json!(["ab", len / 2]), ".[0] * .[1] | length", json!(len));
+    let err = || Error::str("Repeat string result too long");
+    fail(json!(["ab", len / 2 + 1]), ".[0] * .[1]", err());
+    // this used to overflow the capacity
+    fail(json!(["ab", isize::MAX]), ".[0] * .[1]", err());
+    fail(json!(["ab", isize::MAX]), ".[1] * .[0]", err());
+    // this used to fail allocating memory
+    fail(json!(["a", isize::MAX]), ".[0] * .[1]", err());
+}
+
+#[test]
 fn math_rem() {
     // generated with this command with modification for errors and float rounding
     // cargo run -- -rn 'def f: -2, -1, 0, 2.1, 3, 2000000001; f as $a | f as $b | "give!(json!(null), \"\($a) / \($b)\", \(try ($a % $b) catch tojson));"'
