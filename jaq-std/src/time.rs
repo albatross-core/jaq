@@ -93,7 +93,12 @@ pub fn strftime<V: ValT>(v: &V, fmt: &str, tz: impl TimeZone) -> ValR<V> {
         Err(_) => epoch_to_datetime(v),
     }?;
     let dt = dt.with_timezone(&tz).fixed_offset();
-    Ok(dt.format(fmt).to_string().into())
+    // `to_string` would panic on an invalid format, such as `%Q`
+    let mut s = String::new();
+    dt.format(fmt)
+        .write_to(&mut s)
+        .map_err(|_| Error::str(format_args!("cannot format {v} using {fmt}")))?;
+    Ok(s.into())
 }
 
 /// Convert an epoch timestamp to a "broken down time" array.
