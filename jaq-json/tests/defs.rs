@@ -2,7 +2,8 @@
 
 pub mod common;
 
-use common::give;
+use common::{fail, give};
+use jaq_json::Error;
 use serde_json::json;
 
 #[test]
@@ -73,6 +74,18 @@ yields!(
     &(RECURSE_PATHS.to_owned() + "{a: [1, [2]], b: {c: 3}} | [paths]"),
     json!([["a"], ["a", 0], ["a", 1], ["a", 1, 0], ["b"], ["b", "c"]])
 );
+
+#[test]
+fn tonumber() {
+    give(json!(1), "tonumber", json!(1));
+    give(json!("1.5"), "tonumber", json!(1.5));
+    // deep enough to overflow the stack without a bound
+    let s = "[".repeat(100_000);
+    let err = Error::str(format_args!(
+        "cannot parse {s} as JSON: maximal depth exceeded"
+    ));
+    fail(json!(s), "tonumber", err);
+}
 
 #[test]
 fn transpose() {

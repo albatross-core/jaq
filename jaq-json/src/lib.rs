@@ -404,13 +404,20 @@ fn base() -> Box<[Filter<RunPtr<Val>>]> {
     ])
 }
 
+/// Deepest nesting of arrays and objects that `fromjson` accepts.
+#[cfg(feature = "parse")]
+const FROMJSON_DEPTH: usize = 128;
+
 #[cfg(feature = "parse")]
 /// Convert string to a single JSON value.
+///
+/// Fail on arrays and objects nested deeper than [`FROMJSON_DEPTH`],
+/// which could overflow the stack of the recursive parser.
 fn from_json(s: &str) -> ValR {
     use hifijson::token::Lex;
     let mut lexer = hifijson::SliceLexer::new(s.as_bytes());
     lexer
-        .exactly_one(Val::parse)
+        .exactly_one(|token, lexer| Val::parse_bounded(FROMJSON_DEPTH, token, lexer))
         .map_err(|e| Error::str(format_args!("cannot parse {s} as JSON: {e}")))
 }
 
@@ -575,8 +582,24 @@ impl Val {
     /// If the underlying lexer reads input fallibly (for example `IterLexer`),
     /// the error returned by this function might be misleading.
     /// In that case, always check whether the lexer contains an error.
+    ///
+    /// This does not limit how deeply arrays and objects nest.
+    /// To prevent stack overflows, consider using [`Self::parse_bounded`].
     #[cfg(feature = "hifijson")]
     pub fn parse(token: Token, lexer: &mut impl LexAlloc) -> Result<Self, hifijson::Error> {
+        Self::parse_bounded(usize::MAX, token, lexer)
+    }
+
+    /// Parse at least one JSON value like [`Self::parse`], but fail with
+    /// [`hifijson::Error::Depth`] if arrays and objects nest deeper than `depth`.
+    ///
+    /// This serves to prevent stack overflows.
+    #[cfg(feature = "hifijson")]
+    pub fn parse_bounded(
+        depth: usize,
+        token: Token,
+        lexer: &mut impl LexAlloc,
+    ) -> Result<Self, hifijson::Error> {
         use hifijson::{token, Error};
         match token {
             Token::Null => Ok(Self::Null),
@@ -595,21 +618,23 @@ impl Val {
             }
             Token::Quote => Ok(Self::from(lexer.str_string()?.to_string())),
             Token::LSquare => Ok(Self::Arr({
+                let depth = depth.checked_sub(1).ok_or(Error::Depth)?;
                 let mut arr = Vec::new();
                 lexer.seq(Token::RSquare, |token, lexer| {
-                    arr.push(Self::parse(token, lexer)?);
+                    arr.push(Self::parse_bounded(depth, token, lexer)?);
                     Ok::<_, hifijson::Error>(())
                 })?;
                 arr.into()
             })),
             Token::LCurly => Ok(Self::obj({
+                let depth = depth.checked_sub(1).ok_or(Error::Depth)?;
                 let mut obj = Map::default();
                 lexer.seq(Token::RCurly, |token, lexer| {
                     let key =
                         lexer.str_colon(token, |lexer| lexer.str_string().map_err(Error::Str))?;
 
                     let token = lexer.ws_token().ok_or(token::Expect::Value)?;
-                    let value = Self::parse(token, lexer)?;
+                    let value = Self::parse_bounded(depth, token, lexer)?;
                     obj.insert(Rc::new(key.to_string()), value);
                     Ok::<_, Error>(())
                 })?;
@@ -761,7 +786,7 @@ impl core::ops::Mul for Val {
             (Int(x), Int(y)) => Ok(Int(x * y)),
             (Float(f), Int(i)) | (Int(i), Float(f)) => Ok(Float(f * i as f64)),
             (Float(x), Float(y)) => Ok(Float(x * y)),
-            (Str(s), Int(i)) | (Int(i), Str(s)) if i > 0 => Ok(Self::from(s.repeat(i as usize))),
+            (Str(s), Int(i)) | (Int(i), Str(s)) if i > 0 => repeat(&s, i as usize),
             // string multiplication with negatives or 0 results in null
             // <https://jqlang.github.io/jq/manual/#Builtinoperatorsandfunctions>
             (Str(_), Int(_)) | (Int(_), Str(_)) => Ok(Null),
@@ -773,6 +798,20 @@ impl core::ops::Mul for Val {
             }
             (l, r) => Err(Error::math(l, ops::Math::Mul, r)),
         }
+    }
+}
+
+/// Longest string in bytes that repeating a string with `*` may yield.
+const MAX_REPEAT_BYTES: usize = 1 << 24;
+
+/// Repeat a string `n` times.
+///
+/// Fail if the result exceeds [`MAX_REPEAT_BYTES`],
+/// instead of overflowing its capacity or exhausting memory.
+fn repeat(s: &str, n: usize) -> ValR {
+    match s.len().checked_mul(n) {
+        Some(len) if len <= MAX_REPEAT_BYTES => Ok(Val::from(s.repeat(n))),
+        _ => Err(Error::str("Repeat string result too long")),
     }
 }
 
@@ -847,7 +886,7 @@ impl PartialEq for Val {
             (Self::Bool(x), Self::Bool(y)) => x == y,
             (Self::Int(x), Self::Int(y)) => x == y,
             (Self::Int(i), Self::Float(f)) | (Self::Float(f), Self::Int(i)) => {
-                float_eq(*i as f64, *f)
+                int_float_cmp(*i, *f) == Ordering::Equal
             }
             (Self::Float(x), Self::Float(y)) => float_eq(*x, *y),
             (Self::Num(x), Self::Num(y)) if Rc::ptr_eq(x, y) => true,
@@ -876,8 +915,8 @@ impl Ord for Val {
             (Self::Null, Self::Null) => Equal,
             (Self::Bool(x), Self::Bool(y)) => x.cmp(y),
             (Self::Int(x), Self::Int(y)) => x.cmp(y),
-            (Self::Int(i), Self::Float(f)) => float_cmp(*i as f64, *f),
-            (Self::Float(f), Self::Int(i)) => float_cmp(*f, *i as f64),
+            (Self::Int(i), Self::Float(f)) => int_float_cmp(*i, *f),
+            (Self::Float(f), Self::Int(i)) => int_float_cmp(*i, *f).reverse(),
             (Self::Float(x), Self::Float(y)) => float_cmp(*x, *y),
             (Self::Num(x), Self::Num(y)) if Rc::ptr_eq(x, y) => Equal,
             (Self::Num(n), y) => Self::from_dec_str(n).cmp(y),
@@ -922,6 +961,27 @@ impl Ord for Val {
 
 fn float_eq(left: f64, right: f64) -> bool {
     float_cmp(left, right) == Ordering::Equal
+}
+
+/// Compare an integer with a float by their exact values.
+///
+/// Comparing `i as f64` alone is lossy beyond 2^53 and made the order intransitive
+/// (2^53 + 1 > 2^53, yet both equal 2^53 as float), so sorting panicked.
+///
+/// This is not inlined, because inlining it into `cmp` cost
+/// an extra instruction on every comparison of two integers.
+#[inline(never)]
+fn int_float_cmp(i: isize, f: f64) -> Ordering {
+    // rounding to nearest is monotonic, so a strict float order is exact.
+    // a tie makes `f` an integer in [isize::MIN, 2^63]
+    match (i as f64).partial_cmp(&f) {
+        // NaN is smaller than any number, like in `float_cmp`
+        None => Ordering::Greater,
+        // 2^63 is `isize::MAX` rounded up, beyond `isize`
+        Some(Ordering::Equal) if f >= -(isize::MIN as f64) => Ordering::Less,
+        Some(Ordering::Equal) => i.cmp(&(f as isize)),
+        Some(ord) => ord,
+    }
 }
 
 fn float_cmp(left: f64, right: f64) -> Ordering {

@@ -2,7 +2,8 @@
 
 pub mod common;
 
-use common::{give, gives};
+use common::{fail, give, gives};
+use jaq_json::Error;
 use serde_json::json;
 
 yields!(repeat, "def r(f): f, r(f); [limit(3; r(1, 2))]", [1, 2, 1]);
@@ -66,6 +67,15 @@ yields!(
     r#"86400.123456 | strftime("%F %T.%6f")"#,
     "1970-01-02 00:00:00.123456"
 );
+
+#[test]
+fn strftime_invalid() {
+    // these used to panic
+    for fmt in ["%Q", "%", "%Ez", "%F %Q"] {
+        let err = Error::str(format_args!("cannot format 0 using {fmt}"));
+        fail(json!(fmt), ". as $f | 0 | strftime($f)", err);
+    }
+}
 yields!(gmtime, r"86400 | gmtime", [1970, 0, 2, 0, 0, 0, 5, 1]);
 yields!(
     gmtime_mu,

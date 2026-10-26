@@ -69,12 +69,17 @@ yields!(div_str_empty_str, r#""" / "ab""#, json!([]));
 yields!(div_str_empty_sep, r#""aöß" / """#, ["a", "ö", "ß"]);
 
 // Check whether `isize::MIN % -1` yields 0, instead of a panic.
-// The integers come from the input, because jaq-json 1.x
-// turns number literals into floats when calculating with them.
 #[test]
 fn rem_isize_min() {
     give(json!([isize::MIN, -1]), ".[0] % .[1]", json!(0));
 }
+
+// We cannot directly write -9223372036854775808 (= isize::MIN) here,
+// because 9223372036854775808 does not fit into `isize`,
+// so it becomes a decimal number, and negating it yields a float.
+// On the other hand, -9223372036854775807 - 1
+// stays a machine-sized integer.
+yields!(rem_isize_min_lit, "(-9223372036854775807 - 1) % -1", 0);
 
 #[test]
 fn logic() {
