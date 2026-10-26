@@ -117,6 +117,41 @@ fn math_mul_str() {
 }
 
 #[test]
+fn math_neg_big_int() {
+    // integers beyond `isize` are `Num`s, and negating them is exact, like in jq
+    let x = "9223372036854775809";
+    give(
+        json!(null),
+        &format!("-{x} | tojson"),
+        json!(format!("-{x}")),
+    );
+    give(json!(null), &format!("-(-{x}) | tojson"), json!(x));
+    let parsed = format!("\"-{x}\" | fromjson | . == -{x}");
+    give(json!(null), &parsed, json!(true));
+    give(
+        json!(null),
+        &format!("[-{x}, -9223372036854775808] | unique | length"),
+        json!(2),
+    );
+    give(json!(null), &format!("-{x} | abs | tojson"), json!(x));
+    // `-2^63` fits into `isize`
+    give(
+        json!(null),
+        "-9223372036854775808 | . == -9223372036854775807 - 1",
+        json!(true),
+    );
+    give(
+        json!(null),
+        "-9223372036854775808 | tojson",
+        json!("-9223372036854775808"),
+    );
+    // `-i128::MIN` is beyond `i128`, so it becomes a float
+    let max = "170141183460469231731687303715884105728";
+    let min = format!("\"-{max}\" | fromjson | -. | [type, . == {max}.0]");
+    give(json!(null), &min, json!(["number", true]));
+}
+
+#[test]
 fn math_rem() {
     // generated with this command with modification for errors and float rounding
     // cargo run -- -rn 'def f: -2, -1, 0, 2.1, 3, 2000000001; f as $a | f as $b | "give!(json!(null), \"\($a) / \($b)\", \(try ($a % $b) catch tojson));"'

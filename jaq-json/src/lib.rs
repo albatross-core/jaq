@@ -907,7 +907,11 @@ impl core::ops::Neg for Val {
         match self {
             Int(x) => Ok(Int(-x)),
             Float(x) => Ok(Float(-x)),
-            Num(n) => -Self::from_dec_str(&n),
+            // negating an integer is exact, like in jq
+            Num(n) => match Self::num_int(&n).and_then(i128::checked_neg) {
+                Some(i) => Ok(isize::try_from(i).map_or_else(|_| Num(Rc::new(i.to_string())), Int)),
+                None => -Self::from_dec_str(&n),
+            },
             x => Err(Error::typ(x, Type::Num.as_str())),
         }
     }

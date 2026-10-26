@@ -74,12 +74,12 @@ fn rem_isize_min() {
     give(json!([isize::MIN, -1]), ".[0] % .[1]", json!(0));
 }
 
-// We cannot directly write -9223372036854775808 (= isize::MIN) here,
-// because 9223372036854775808 does not fit into `isize`,
-// so it becomes a decimal number, and negating it yields a float.
-// On the other hand, -9223372036854775807 - 1
-// stays a machine-sized integer.
+// -9223372036854775807 - 1 stays a machine-sized integer.
 yields!(rem_isize_min_lit, "(-9223372036854775807 - 1) % -1", 0);
+// In -9223372036854775808 (= isize::MIN), 9223372036854775808 does not fit
+// into `isize`, so it becomes a decimal number, but negating it is exact
+// and yields a machine-sized integer again.
+yields!(rem_isize_min_neg_lit, "-9223372036854775808 % -1", 0);
 
 #[test]
 fn logic() {
