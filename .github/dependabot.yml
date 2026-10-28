@@ -1,0 +1,31 @@
+version: 2
+updates:
+  - package-ecosystem: "cargo"
+    # Workspace root: members + Cargo.lock. jaq-core/fuzz has its own
+    # lockfile and is left out, it only builds fuzz targets.
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    cooldown:
+      default-days: 7
+
+    # A bump can raise the MSRV (jaq-core 1.63). msrv.yml checks it on
+    # every push touching Cargo.lock, but is not a required check.
+    groups:
+      cargo-minor-patch:
+        update-types: ["minor", "patch"]
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    cooldown:
+      default-days: 7
+
+    groups:
+      actions:
+        patterns:
+          - "*"
+        update-types: ["minor", "patch"]
