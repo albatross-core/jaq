@@ -148,6 +148,8 @@ pub(crate) enum Fold<T> {
     Foreach(Option<T>),
 }
 
+// Derive would require `T: Default` on MSRV 1.63, `TermId` has none.
+#[allow(clippy::derivable_impls)]
 impl<T> Default for Term<T> {
     fn default() -> Self {
         Self::Id
