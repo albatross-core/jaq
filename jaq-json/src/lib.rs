@@ -593,7 +593,7 @@ impl Val {
     /// Return any `key` for which `value | .[key]` is defined, as well as its output.
     ///
     /// Return `None` for values that are neither arrays nor objects.
-    fn key_values(&self) -> Option<BoxIter<(Val, &Val)>> {
+    fn key_values(&self) -> Option<BoxIter<'_, (Val, &Val)>> {
         let arr_idx = |(i, x)| (Self::Int(i as isize), x);
         Some(match self {
             Self::Arr(a) => Box::new(a.iter().enumerate().map(arr_idx)),
