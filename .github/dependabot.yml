@@ -16,6 +16,31 @@ updates:
       cargo-minor-patch:
         update-types: ["minor", "patch"]
 
+    ignore:
+      # rust-version above MSRV of crates using them: jaq-core 1.63,
+      # jaq-std and jaq-json 1.65, msrv.yml builds whole workspace on 1.66
+      - dependency-name: "once_cell"
+        versions: [">=1.21.0"]
+      - dependency-name: "indexmap"
+        versions: [">=2.12.0"]
+      - dependency-name: "log"
+        versions: [">=0.4.29"]
+      - dependency-name: "js-sys"
+        versions: [">=0.3.83"]
+      - dependency-name: "web-sys"
+        versions: [">=0.3.83"]
+      - dependency-name: "wasm-bindgen"
+        versions: [">=0.2.106"]
+      # Breaking bumps kept out: hifijson 0.3+ rewrites parser API under
+      # fromjson depth limit, codesnake 0.3+ only renders CLI errors,
+      # base64 0.23+ needs rustc 1.71
+      - dependency-name: "hifijson"
+        versions: [">=0.3.0"]
+      - dependency-name: "codesnake"
+        versions: [">=0.3.0"]
+      - dependency-name: "base64"
+        versions: [">=0.23.0"]
+
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
