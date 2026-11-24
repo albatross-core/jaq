@@ -298,7 +298,7 @@ dependencies = [
  "mimalloc",
  "rustyline",
  "tempfile",
- "unicode-width",
+ "unicode-width 0.2.3",
  "yansi",
 ]
 
@@ -340,7 +340,7 @@ dependencies = [
  "jaq-std",
  "js-sys",
  "log",
- "unicode-width",
+ "unicode-width 0.2.3",
  "wasm-bindgen",
  "web-sys",
 ]
@@ -546,7 +546,7 @@ dependencies = [
  "memchr",
  "nix",
  "unicode-segmentation",
- "unicode-width",
+ "unicode-width 0.1.14",
  "utf8parse",
  "winapi",
 ]
@@ -677,6 +677,12 @@ name = "unicode-width"
 version = "0.1.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7dd6e30e90baa6f72411720665d41d89b9a3d039dc45b8faea1ddd07f617f6af"
+
+[[package]]
+name = "unicode-width"
+version = "0.2.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ca718471876992059f251e33aafc334346ada08042b7661dd1fe313a9bced557"
 
 [[package]]
 name = "urlencoding"
