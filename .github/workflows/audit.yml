@@ -1,0 +1,36 @@
+name: Security audit
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+    paths:
+      - '**/Cargo.toml'
+      - '**/Cargo.lock'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - '**/Cargo.toml'
+      - '**/Cargo.lock'
+  # Advisories are published independently of changes to this repository,
+  # so also check the dependencies once a week.
+  schedule:
+    - cron: '17 6 * * 1'
+
+permissions:
+  contents: read
+  # audit-check reports findings as a check run on pushes and pull requests,
+  # and opens an issue for findings on scheduled runs.
+  checks: write
+  issues: write
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+    - name: Audit dependencies for known vulnerabilities
+      uses: rustsec/audit-check@69366f33c96575abad1ee0dba8212993eecbe998 # v2.0.0
+      with:
+        token: ${{ secrets.GITHUB_TOKEN }}
